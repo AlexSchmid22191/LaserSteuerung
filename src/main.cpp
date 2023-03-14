@@ -5,11 +5,11 @@
 #include <Adafruit_MAX31856.h>
 
 // Pin definitions
-const byte pwr_control_pin = 4;
+const byte pwr_control_pin = 5;
 const byte enable_pin = 2;
 const byte MAX_CS = 10;
 
-Adafruit_MAX31856 maxthermo = Adafruit_MAX31856(10);
+Adafruit_MAX31856 maxthermo = Adafruit_MAX31856(MAX_CS);
 
 // Register definitions
 enum Register
@@ -32,14 +32,19 @@ enum Register
 
 
 void set_output_power(int power);
-void update_working_registers();
 
 void setup()
 {
   Serial.begin(9600);
 
+  pinMode(enable_pin, OUTPUT);
+  pinMode(pwr_control_pin, OUTPUT);
+
+  digitalWrite(enable_pin, LOW);
+  digitalWrite(pwr_control_pin, LOW);
+
   // start the Modbus RTU server, with (slave) id 1
-  if (!ModbusRTUServer.begin(1, 9600))
+  if(!ModbusRTUServer.begin(1, 9600))
   {
     Serial.println("Failed to start Modbus RTU Server!");
     while (1);
@@ -83,6 +88,7 @@ void loop()
   {
     set_output_power(ModbusRTUServer.holdingRegisterRead(reg_manual_power));
   }
+  digitalWrite(enable_pin, ModbusRTUServer.holdingRegisterRead(reg_software_enable));
 }
 
 void set_output_power(int power)
