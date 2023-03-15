@@ -5,7 +5,7 @@
 #include <Adafruit_MAX31856.h>
 
 // Pin definitions
-const byte pwr_control_pin = 5;
+const byte pwr_control_pin = 9;
 const byte enable_pin = 2;
 const byte MAX_CS = 10;
 
@@ -32,18 +32,18 @@ enum Register
 
 
 void set_output_power(int power);
+void setup_timer();
 
 void setup()
 {
-  Serial.begin(9600);
-
   pinMode(enable_pin, OUTPUT);
   pinMode(pwr_control_pin, OUTPUT);
-
   digitalWrite(enable_pin, LOW);
   digitalWrite(pwr_control_pin, LOW);
+  setup_timer();
 
   // start the Modbus RTU server, with (slave) id 1
+  Serial.begin(9600);
   if(!ModbusRTUServer.begin(1, 9600))
   {
     Serial.println("Failed to start Modbus RTU Server!");
@@ -95,4 +95,20 @@ void set_output_power(int power)
 {
   // Adjust duty cycle
   // Direct timer manipulation to access 16 birt resolution
+  OCR1A = power;
+}
+
+void setup_timer()
+{
+  // Setup timer 1 for PWM output
+  // Phase and frequency correct pwm mode
+  // No prescaler
+  // Top value 10000
+  // PWM frequency 800 Hz
+  noInterrupts();
+  TCCR1A = 0 | (1 << COM1A1);
+  TCCR1B = 0 | (1<<WGM13) | (1<<CS10);
+  ICR1 = 10000;
+  OCR1A = 0;
+  interrupts();
 }
