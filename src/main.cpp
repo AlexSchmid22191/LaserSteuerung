@@ -1,6 +1,7 @@
 #include <Wire.h>
 #include <EEPROM.h>
 #include <Arduino.h>
+#include <PID_v1.h>
 #include <ArduinoRS485.h>
 #include <ArduinoModbus.h>
 #include <Adafruit_MAX31856.h>
@@ -11,6 +12,14 @@ const byte enable_pin = 2;
 const byte MAX_CS = 10;
 
 Adafruit_MAX31856 maxthermo = Adafruit_MAX31856(MAX_CS);
+
+// Temporary variables because the PID algorithm works with doubles but the Modbus Server stores unsigned integers
+double pid_setpoint;
+double pid_input;
+double pid_output;
+
+PID pid_controller(&pid_input, &pid_output, &pid_setpoint, 1, 1, 1, DIRECT);
+
 
 // Register definitions
 enum Register
@@ -45,6 +54,9 @@ void set_output_power(int power);
 void setup_timer();
 void write_to_eeprom();
 void read_from_eeprom();
+void set_pid_parameters();
+void pid_reg_to_temp();
+void pid_temp_to_reg();
 
 void setup()
 {
@@ -71,6 +83,7 @@ void setup()
   // Everything will be handled by holding registers, all data is stored as 16 bit int (Like Eurotherms do)
   ModbusRTUServer.configureHoldingRegisters(0x00, SIZE_REGISTERS);
   read_from_eeprom();
+  pid_controller.SetOutputLimits(0, 10000);
 }
 
 void loop()
@@ -89,11 +102,13 @@ void loop()
     ModbusRTUServer.holdingRegisterWrite(reg_working_process_variable, static_cast<int>(maxthermo.readThermocoupleTemperature() * 10 + 0.5));
   }
 
+  // Control loop
   if(ModbusRTUServer.holdingRegisterRead(reg_control_mode))
   {
-    //TODO: do automatic mode:
     //TODO: working_setpoint_adjust()
-    //TODO: PID calculation
+    pid_reg_to_temp();
+    pid_controller.Compute();
+    pid_temp_to_reg();
 
     set_output_power(ModbusRTUServer.holdingRegisterRead(reg_working_power));
   }
@@ -101,10 +116,10 @@ void loop()
   {
     set_output_power(ModbusRTUServer.holdingRegisterRead(reg_manual_power));
   }
+
   digitalWrite(enable_pin, ModbusRTUServer.holdingRegisterRead(reg_software_enable));
 
-  // TODO: Adjust PID parameters from registers
-  // TODO: Write PID parameters to eeprom
+  set_pid_parameters();
   write_to_eeprom();
 }
 
@@ -145,4 +160,24 @@ void read_from_eeprom()
   ModbusRTUServer.holdingRegisterWrite(reg_pid_i, EEPROM.get(ee_pid_i, temp));
   ModbusRTUServer.holdingRegisterWrite(reg_pid_d, EEPROM.get(ee_pid_d, temp));
   ModbusRTUServer.holdingRegisterWrite(reg_rate, EEPROM.get(ee_rate, temp));
+}
+
+void pid_reg_to_temp()
+{
+  pid_setpoint = static_cast<double>(ModbusRTUServer.holdingRegisterRead(reg_working_setpoint));
+  pid_input = static_cast<double>(ModbusRTUServer.holdingRegisterRead(reg_working_process_variable));
+}
+
+void pid_temp_to_reg()
+{
+  ModbusRTUServer.holdingRegisterWrite(reg_working_power, static_cast<unsigned int>(pid_output));
+}
+
+void set_pid_parameters()
+{
+  // Read PID paramters from registers, convert to parallel form and set parameters
+  double kp = 1 / ModbusRTUServer.holdingRegisterRead(reg_pid_p);
+  double ki = kp / ModbusRTUServer.holdingRegisterRead(reg_pid_i);
+  double kd = kp * ModbusRTUServer.holdingRegisterRead(reg_pid_d);
+  pid_controller.SetTunings(kp, ki, kd);
 }
