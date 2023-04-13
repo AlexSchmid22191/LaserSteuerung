@@ -1,4 +1,5 @@
 #include <Wire.h>
+#include <EEPROM.h>
 #include <Arduino.h>
 #include <ArduinoRS485.h>
 #include <ArduinoModbus.h>
@@ -30,9 +31,20 @@ enum Register
   SIZE_REGISTERS
 };
 
+// EEPROM storage locations
+enum EEPROMAdress
+{
+  ee_rate = 0,
+  ee_pid_p = 2,
+  ee_pid_i = 4,
+  ee_pid_d = 6
+};
+
 
 void set_output_power(int power);
 void setup_timer();
+void write_to_eeprom();
+void read_from_eeprom();
 
 void setup()
 {
@@ -42,7 +54,7 @@ void setup()
   digitalWrite(pwr_control_pin, LOW);
   setup_timer();
 
-  // start the Modbus RTU server, with (slave) id 1
+  // Start the Modbus RTU server, with (slave) id 1
   Serial.begin(9600);
   if(!ModbusRTUServer.begin(1, 9600))
   {
@@ -58,6 +70,7 @@ void setup()
 
   // Everything will be handled by holding registers, all data is stored as 16 bit int (Like Eurotherms do)
   ModbusRTUServer.configureHoldingRegisters(0x00, SIZE_REGISTERS);
+  read_from_eeprom();
 }
 
 void loop()
@@ -78,9 +91,9 @@ void loop()
 
   if(ModbusRTUServer.holdingRegisterRead(reg_control_mode))
   {
-    //do automatic mode:
-    //working_setpoint_adjust()
-    //PID calculation
+    //TODO: do automatic mode:
+    //TODO: working_setpoint_adjust()
+    //TODO: PID calculation
 
     set_output_power(ModbusRTUServer.holdingRegisterRead(reg_working_power));
   }
@@ -89,6 +102,10 @@ void loop()
     set_output_power(ModbusRTUServer.holdingRegisterRead(reg_manual_power));
   }
   digitalWrite(enable_pin, ModbusRTUServer.holdingRegisterRead(reg_software_enable));
+
+  // TODO: Adjust PID parameters from registers
+  // TODO: Write PID parameters to eeprom
+  write_to_eeprom();
 }
 
 void set_output_power(int power)
@@ -111,4 +128,21 @@ void setup_timer()
   ICR1 = 10000;
   OCR1A = 0;
   interrupts();
+}
+
+void write_to_eeprom()
+{
+  EEPROM.put(ee_pid_p, ModbusRTUServer.holdingRegisterRead(reg_pid_p));
+  EEPROM.put(ee_pid_i, ModbusRTUServer.holdingRegisterRead(reg_pid_i));
+  EEPROM.put(ee_pid_d, ModbusRTUServer.holdingRegisterRead(reg_pid_d));
+  EEPROM.put(ee_rate, ModbusRTUServer.holdingRegisterRead(reg_rate));
+}
+
+void read_from_eeprom()
+{
+  unsigned int temp;
+  ModbusRTUServer.holdingRegisterWrite(reg_pid_p, EEPROM.get(ee_pid_p, temp));
+  ModbusRTUServer.holdingRegisterWrite(reg_pid_i, EEPROM.get(ee_pid_i, temp));
+  ModbusRTUServer.holdingRegisterWrite(reg_pid_d, EEPROM.get(ee_pid_d, temp));
+  ModbusRTUServer.holdingRegisterWrite(reg_rate, EEPROM.get(ee_rate, temp));
 }
