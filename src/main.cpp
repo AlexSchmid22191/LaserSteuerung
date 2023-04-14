@@ -146,3 +146,27 @@ void read_from_eeprom()
   ModbusRTUServer.holdingRegisterWrite(reg_pid_d, EEPROM.get(ee_pid_d, temp));
   ModbusRTUServer.holdingRegisterWrite(reg_rate, EEPROM.get(ee_rate, temp));
 }
+
+void pid_calculation()
+{
+  // Draf for PID function, unit need to be checked
+  const int interval = 100;
+
+  static unsigned long last_update = millis();
+  if(millis() - last_update < interval) return;
+
+  last_update = millis();
+
+  static int last_error = 0;
+  static int error_sum = 0;
+
+  int error = ModbusRTUServer.holdingRegisterRead(reg_working_setpoint) - ModbusRTUServer.holdingRegisterRead(reg_working_process_variable);
+  error_sum += error;
+  int error_diff = error - last_error;
+  last_error = error;
+
+  int output = (error + error_sum * interval / ModbusRTUServer.holdingRegisterRead(reg_pid_i) + error_diff * ModbusRTUServer.holdingRegisterRead(reg_pid_d) / interval) / ModbusRTUServer.holdingRegisterRead(reg_pid_p);
+  output = constrain(output, 0, 10000);
+
+  ModbusRTUServer.holdingRegisterWrite(reg_working_power, output);
+}
