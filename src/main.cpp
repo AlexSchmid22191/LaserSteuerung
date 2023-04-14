@@ -149,7 +149,11 @@ void read_from_eeprom()
 
 void pid_calculation()
 {
-  // Draf for PID function, unit need to be checked
+  // About units:
+  // All temperature like variables (process_variable, setpoint, error, sum_error and diff_error, pid_p) are stored in tenths of a degree C
+  // Integration and derivative time are stored in seconds
+  // The time interval is stored in milliseconds, hence the factors 1000 in line -3
+
   const int interval = 100;
 
   static unsigned long last_update = millis();
@@ -165,8 +169,8 @@ void pid_calculation()
   int error_diff = error - last_error;
   last_error = error;
 
-  int output = (error + error_sum * interval / ModbusRTUServer.holdingRegisterRead(reg_pid_i) + error_diff * ModbusRTUServer.holdingRegisterRead(reg_pid_d) / interval) / ModbusRTUServer.holdingRegisterRead(reg_pid_p);
-  output = constrain(output, 0, 10000);
+  long int output = (error + error_sum * interval / 1000 / ModbusRTUServer.holdingRegisterRead(reg_pid_i) + error_diff * ModbusRTUServer.holdingRegisterRead(reg_pid_d) / interval * 1000) / ModbusRTUServer.holdingRegisterRead(reg_pid_p);
+  output = static_cast<int>(constrain(output, 0, 10000));
 
   ModbusRTUServer.holdingRegisterWrite(reg_working_power, output);
 }
