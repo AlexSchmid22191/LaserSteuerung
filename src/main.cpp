@@ -166,8 +166,14 @@ void pid_calculation()
   static long int error_sum = 0;
 
   long int error = ModbusRTUServer.holdingRegisterRead(reg_working_setpoint) - ModbusRTUServer.holdingRegisterRead(reg_working_process_variable);
-  // TODO Add over/underflow prevention to sum_error
-  error_sum += error;
+
+  // Over/underflow prevention for error integration
+  const long int max_error_sum = 2147483647L;
+  const long int min_error_sum = -2147483648L;
+  if(max_error_sum - error_sum < error && error > 0) error_sum = max_error_sum;
+  else if(min_error_sum - error_sum > error && error < 0) error_sum = min_error_sum;
+  else error_sum += error;
+
   long int error_diff = error - last_error;
   last_error = error;
 
