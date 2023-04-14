@@ -45,6 +45,7 @@ void set_output_power(int power);
 void setup_timer();
 void write_to_eeprom();
 void read_from_eeprom();
+void pid_calculation();
 
 void setup()
 {
@@ -93,7 +94,7 @@ void loop()
   {
     //TODO: do automatic mode:
     //TODO: working_setpoint_adjust()
-    //TODO: PID calculation
+    pid_calculation();
 
     set_output_power(ModbusRTUServer.holdingRegisterRead(reg_working_power));
   }
@@ -161,12 +162,13 @@ void pid_calculation()
 
   last_update = millis();
 
-  static int last_error = 0;
-  static int error_sum = 0;
+  static long int last_error = 0;
+  static long int error_sum = 0;
 
-  int error = ModbusRTUServer.holdingRegisterRead(reg_working_setpoint) - ModbusRTUServer.holdingRegisterRead(reg_working_process_variable);
+  long int error = ModbusRTUServer.holdingRegisterRead(reg_working_setpoint) - ModbusRTUServer.holdingRegisterRead(reg_working_process_variable);
+  // TODO Add over/underflow prevention to sum_error
   error_sum += error;
-  int error_diff = error - last_error;
+  long int error_diff = error - last_error;
   last_error = error;
 
   long int output = (error + error_sum * interval / 1000 / ModbusRTUServer.holdingRegisterRead(reg_pid_i) + error_diff * ModbusRTUServer.holdingRegisterRead(reg_pid_d) / interval * 1000) / ModbusRTUServer.holdingRegisterRead(reg_pid_p);
