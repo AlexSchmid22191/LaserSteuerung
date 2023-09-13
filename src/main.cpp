@@ -40,8 +40,8 @@ enum EEPROMAdress
   ee_pid_d = 6
 };
 
-
 void set_output_power(int power);
+void working_setpoint_adjust();
 void setup_timer();
 void write_to_eeprom();
 void read_from_eeprom();
@@ -63,10 +63,11 @@ void setup()
 
   // Start the Modbus RTU server, with (slave) id 1
   Serial.begin(9600);
-  if(!ModbusRTUServer.begin(1, 9600))
+  if (!ModbusRTUServer.begin(1, 9600))
   {
     Serial.println("Failed to start Modbus RTU Server!");
-    while (1);
+    while (1)
+      ;
   }
 
   // Initialize to type S thermocouple
@@ -87,7 +88,7 @@ void loop()
   // Read thermocouple error state and store it in the register, if errors are detected switch the enable register off
   // If no errors are detected, read temperature
   ModbusRTUServer.holdingRegisterWrite(reg_tc_error, maxthermo.readFault());
-  if(ModbusRTUServer.holdingRegisterRead(reg_tc_error))
+  if (ModbusRTUServer.holdingRegisterRead(reg_tc_error))
   {
     ModbusRTUServer.holdingRegisterWrite(reg_software_enable, 0);
   }
@@ -96,14 +97,13 @@ void loop()
     ModbusRTUServer.holdingRegisterWrite(reg_working_process_variable, static_cast<int>(maxthermo.readThermocoupleTemperature() * 10 + 0.5));
   }
 
-  if(ModbusRTUServer.holdingRegisterRead(reg_control_mode))
+  if (ModbusRTUServer.holdingRegisterRead(reg_control_mode))
   {
     ModbusRTUServer.holdingRegisterWrite(reg_working_power, ModbusRTUServer.holdingRegisterRead(reg_manual_power));
   }
   else
   {
-    //TODO: do automatic mode:
-    //TODO: working_setpoint_adjust()
+    working_setpoint_adjust();
     pid_calculation();
   }
 
@@ -131,7 +131,7 @@ void setup_timer()
   // PWM frequency 800 Hz
   noInterrupts();
   TCCR1A = 0 | (1 << COM1A1);
-  TCCR1B = 0 | (1<<WGM13) | (1<<CS10);
+  TCCR1B = 0 | (1 << WGM13) | (1 << CS10);
   ICR1 = 10000;
   OCR1A = 0;
   interrupts();
@@ -167,7 +167,8 @@ void pid_calculation()
   const int interval = 100;
 
   static unsigned long last_update = millis();
-  if(millis() - last_update < interval) return;
+  if (millis() - last_update < interval)
+    return;
 
   last_update = millis();
 
@@ -179,9 +180,12 @@ void pid_calculation()
   // Over/underflow prevention for error integration
   const long int max_error_sum = 2147483647L;
   const long int min_error_sum = -2147483648L;
-  if(max_error_sum - error_sum < error && error > 0) error_sum = max_error_sum;
-  else if(min_error_sum - error_sum > error && error < 0) error_sum = min_error_sum;
-  else error_sum += error;
+  if (max_error_sum - error_sum < error && error > 0)
+    error_sum = max_error_sum;
+  else if (min_error_sum - error_sum > error && error < 0)
+    error_sum = min_error_sum;
+  else
+    error_sum += error;
 
   long int error_diff = error - last_error;
   last_error = error;
@@ -190,4 +194,32 @@ void pid_calculation()
   output = static_cast<int>(constrain(output, 0, 10000));
 
   ModbusRTUServer.holdingRegisterWrite(reg_working_power, output);
+}
+
+void working_setpoint_adjust()
+{
+  // Adjust the working setpoint with the given ramp
+  // If the working setpoint already equals the target setpoint, do nothing
+  // Every 100 milliseconds a new setpoint is calculated based on elapsed time since last update and ramp
+  // The setpoint is written to the Modbus register as 10ths of degrees, but kept internally as [deciDegrees times millisecond per minute] to minimize rounding errors
+
+  if (ModbusRTUServer.holdingRegisterRead(reg_working_setpoint) == ModbusRTUServer.holdingRegisterRead(reg_target_setpoint))
+    return;
+  
+  static unsigned long int last_update = millis();
+  static long int last_setpoint = 0;
+  unsigned long int now = millis();
+
+  if (now - last_update > 100)
+  {
+    unsigned long int increment = ModbusRTUServer.holdingRegisterRead(reg_rate) * (now - last_update);
+    if (last_setpoint/1000/60 < ModbusRTUServer.holdingRegisterRead(reg_target_setpoint))
+    {
+      last_setpoint += increment;
+    }
+    else
+      last_setpoint -= increment;
+    last_update = now;
+    ModbusRTUServer.holdingRegisterWrite(reg_working_setpoint, static_cast<int>(last_setpoint/1000/60+0.5));
+  }
 }
