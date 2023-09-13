@@ -203,23 +203,35 @@ void working_setpoint_adjust()
   // Every 100 milliseconds a new setpoint is calculated based on elapsed time since last update and ramp
   // The setpoint is written to the Modbus register as 10ths of degrees, but kept internally as [deciDegrees times millisecond per minute] to minimize rounding errors
 
-  if (ModbusRTUServer.holdingRegisterRead(reg_working_setpoint) == ModbusRTUServer.holdingRegisterRead(reg_target_setpoint))
-    return;
-  
+  static bool is_ramping = false;
   static unsigned long int last_update = millis();
-  static long int last_setpoint = 0;
-  unsigned long int now = millis();
-
-  if (now - last_update > 100)
+  
+  if(is_ramping)
   {
-    unsigned long int increment = ModbusRTUServer.holdingRegisterRead(reg_rate) * (now - last_update);
-    if (last_setpoint/1000/60 < ModbusRTUServer.holdingRegisterRead(reg_target_setpoint))
+    if((ModbusRTUServer.holdingRegisterRead(reg_working_setpoint) == ModbusRTUServer.holdingRegisterRead(reg_target_setpoint)))
     {
-      last_setpoint += increment;
+      is_ramping = false;
+      return;
     }
-    else
-      last_setpoint -= increment;
-    last_update = now;
-    ModbusRTUServer.holdingRegisterWrite(reg_working_setpoint, static_cast<int>(last_setpoint/1000/60+0.5));
+    static long int last_setpoint = 0;
+    unsigned long int now = millis();
+    if (now - last_update > 100)
+    {
+      unsigned long int increment = ModbusRTUServer.holdingRegisterRead(reg_rate) * (now - last_update);
+      if (last_setpoint/1000/60 < ModbusRTUServer.holdingRegisterRead(reg_target_setpoint))
+      {
+        last_setpoint += increment;
+      }
+      else
+        last_setpoint -= increment;
+      last_update = now;
+      ModbusRTUServer.holdingRegisterWrite(reg_working_setpoint, static_cast<int>(last_setpoint/1000/60+0.5));
+    }
+  }
+  else
+  {
+    if((ModbusRTUServer.holdingRegisterRead(reg_working_setpoint) != ModbusRTUServer.holdingRegisterRead(reg_target_setpoint)))
+    is_ramping = true;
+    last_update = millis();
   }
 }
