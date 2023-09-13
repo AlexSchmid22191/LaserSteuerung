@@ -47,6 +47,12 @@ void write_to_eeprom();
 void read_from_eeprom();
 void pid_calculation();
 
+// About units:
+// All temperature like variables (process_variable, setpoint, error, sum_error and diff_error, pid_p) are stored in tenths of a degree C
+// Integration and derivative time are stored in seconds
+// The time interval is stored in milliseconds, hence the factors 1000 in line +24
+// The output is stored in hundreths of percents
+
 void setup()
 {
   pinMode(enable_pin, OUTPUT);
@@ -92,16 +98,16 @@ void loop()
 
   if(ModbusRTUServer.holdingRegisterRead(reg_control_mode))
   {
-    //TODO: do automatic mode:
-    //TODO: working_setpoint_adjust()
-    pid_calculation();
-
-    set_output_power(ModbusRTUServer.holdingRegisterRead(reg_working_power));
+    ModbusRTUServer.holdingRegisterWrite(reg_working_power, ModbusRTUServer.holdingRegisterRead(reg_manual_power));
   }
   else
   {
-    set_output_power(ModbusRTUServer.holdingRegisterRead(reg_manual_power));
+    //TODO: do automatic mode:
+    //TODO: working_setpoint_adjust()
+    pid_calculation();
   }
+
+  set_output_power(ModbusRTUServer.holdingRegisterRead(reg_working_power));
   digitalWrite(enable_pin, ModbusRTUServer.holdingRegisterRead(reg_software_enable));
 
   // TODO: Adjust PID parameters from registers
@@ -133,6 +139,8 @@ void setup_timer()
 
 void write_to_eeprom()
 {
+  return;
+  // TODO: Refactor this to updates
   EEPROM.put(ee_pid_p, ModbusRTUServer.holdingRegisterRead(reg_pid_p));
   EEPROM.put(ee_pid_i, ModbusRTUServer.holdingRegisterRead(reg_pid_i));
   EEPROM.put(ee_pid_d, ModbusRTUServer.holdingRegisterRead(reg_pid_d));
@@ -153,7 +161,8 @@ void pid_calculation()
   // About units:
   // All temperature like variables (process_variable, setpoint, error, sum_error and diff_error, pid_p) are stored in tenths of a degree C
   // Integration and derivative time are stored in seconds
-  // The time interval is stored in milliseconds, hence the factors 1000 in line -3
+  // The time interval is stored in milliseconds, hence the factors 1000 in line +24
+  // The output is stored in hundreths of percents
 
   const int interval = 100;
 
