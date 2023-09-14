@@ -6,9 +6,9 @@
 #include <Adafruit_MAX31856.h>
 
 // Pin definitions
-const byte pwr_control_pin = 9;
-const byte enable_pin = 2;
-const byte MAX_CS = 10;
+const uint8_t pwr_control_pin = 9;
+const uint8_t enable_pin = 2;
+const uint8_t MAX_CS = 10;
 
 Adafruit_MAX31856 maxthermo = Adafruit_MAX31856(MAX_CS);
 
@@ -34,10 +34,10 @@ enum Register
 // EEPROM storage locations
 enum EEPROMAdress
 {
-  ee_rate = 0,
-  ee_pid_p = 2,
-  ee_pid_i = 4,
-  ee_pid_d = 6
+  ee_rate = 10,
+  ee_pid_p = 12,
+  ee_pid_i = 14,
+  ee_pid_d = 16
 };
 
 void set_output_power(int power);
@@ -50,7 +50,7 @@ void pid_calculation();
 // About units:
 // All temperature like variables (process_variable, setpoint, error, sum_error and diff_error, pid_p) are stored in tenths of a degree C
 // Integration and derivative time are stored in seconds
-// The time interval is stored in milliseconds, hence the factors 1000 in line +24
+// The time interval is stored in milliseconds
 // The output is stored in hundreths of percents
 
 void setup()
@@ -110,8 +110,6 @@ void loop()
   set_output_power(ModbusRTUServer.holdingRegisterRead(reg_working_power));
   digitalWrite(enable_pin, ModbusRTUServer.holdingRegisterRead(reg_software_enable));
 
-  // TODO: Adjust PID parameters from registers
-  // TODO: Write PID parameters to eeprom
   write_to_eeprom();
 }
 
@@ -139,17 +137,39 @@ void setup_timer()
 
 void write_to_eeprom()
 {
-  return;
-  // TODO: Refactor this to updates
-  EEPROM.put(ee_pid_p, ModbusRTUServer.holdingRegisterRead(reg_pid_p));
-  EEPROM.put(ee_pid_i, ModbusRTUServer.holdingRegisterRead(reg_pid_i));
-  EEPROM.put(ee_pid_d, ModbusRTUServer.holdingRegisterRead(reg_pid_d));
-  EEPROM.put(ee_rate, ModbusRTUServer.holdingRegisterRead(reg_rate));
+  static uint16_t pid_p = static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_p));
+  static uint16_t pid_i = static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_i));
+  static uint16_t pid_d = static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_d));
+  static uint16_t rate = static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_rate));
+
+  if(static_cast<int>(ModbusRTUServer.holdingRegisterRead(reg_pid_p)) != pid_p)
+  {
+    pid_p = static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_p));
+    EEPROM.put(ee_pid_p, pid_p);
+  }
+
+  if(static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_i)) != pid_i)
+  {
+    pid_i = static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_i));
+    EEPROM.put(ee_pid_i, pid_i);
+  }
+
+  if(static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_d)) != pid_d)
+  {
+    pid_d = static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_d));
+    EEPROM.put(ee_pid_d, pid_d);
+  }
+
+  if(static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_rate)) != rate)
+  {
+    rate = static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_rate));
+    EEPROM.put(ee_rate, rate);
+  }
 }
 
 void read_from_eeprom()
 {
-  unsigned int temp;
+  uint16_t temp;
   ModbusRTUServer.holdingRegisterWrite(reg_pid_p, EEPROM.get(ee_pid_p, temp));
   ModbusRTUServer.holdingRegisterWrite(reg_pid_i, EEPROM.get(ee_pid_i, temp));
   ModbusRTUServer.holdingRegisterWrite(reg_pid_d, EEPROM.get(ee_pid_d, temp));
@@ -163,6 +183,8 @@ void pid_calculation()
   // Integration and derivative time are stored in seconds
   // The time interval is stored in milliseconds, hence the factors 1000 in line +24
   // The output is stored in hundreths of percents
+
+  //Maybe change this back to the Arduino PID Library
 
   const int interval = 100;
 
@@ -178,8 +200,8 @@ void pid_calculation()
   long int error = ModbusRTUServer.holdingRegisterRead(reg_working_setpoint) - ModbusRTUServer.holdingRegisterRead(reg_working_process_variable);
 
   // Over/underflow prevention for error integration
-  const long int max_error_sum = 2147483647L;
-  const long int min_error_sum = -2147483648L;
+  const long int max_error_sum = 21474836L;
+  const long int min_error_sum = -21474836L;
   if (max_error_sum - error_sum < error && error > 0)
     error_sum = max_error_sum;
   else if (min_error_sum - error_sum > error && error < 0)
@@ -190,7 +212,8 @@ void pid_calculation()
   long int error_diff = error - last_error;
   last_error = error;
 
-  long int output = (error + error_sum * interval / 1000 / ModbusRTUServer.holdingRegisterRead(reg_pid_i) + error_diff * ModbusRTUServer.holdingRegisterRead(reg_pid_d) / interval * 1000) / ModbusRTUServer.holdingRegisterRead(reg_pid_p);
+  // Here do bad things happen probably!
+  long int output = (error + error_sum * interval / 1000 / ModbusRTUServer.holdingRegisterRead(reg_pid_i) + error_diff * ModbusRTUServer.holdingRegisterRead(reg_pid_d) * 1000 / interval) * 10000 / ModbusRTUServer.holdingRegisterRead(reg_pid_p);
   output = static_cast<int>(constrain(output, 0, 10000));
 
   ModbusRTUServer.holdingRegisterWrite(reg_working_power, output);
@@ -198,6 +221,7 @@ void pid_calculation()
 
 void working_setpoint_adjust()
 {
+  //TODO: Add overshoot protection!!
   // Adjust the working setpoint with the given ramp
   // If the working setpoint already equals the target setpoint, do nothing
   // Every 100 milliseconds a new setpoint is calculated based on elapsed time since last update and ramp
