@@ -142,7 +142,7 @@ void write_to_eeprom()
   static uint16_t pid_d = static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_d));
   static uint16_t rate = static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_rate));
 
-  if(static_cast<int>(ModbusRTUServer.holdingRegisterRead(reg_pid_p)) != pid_p)
+  if(static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_p)) != pid_p)
   {
     pid_p = static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_p));
     EEPROM.put(ee_pid_p, pid_p);
@@ -181,42 +181,47 @@ void pid_calculation()
   // About units:
   // All temperature like variables (process_variable, setpoint, error, sum_error and diff_error, pid_p) are stored in tenths of a degree C
   // Integration and derivative time are stored in seconds
-  // The time interval is stored in milliseconds, hence the factors 1000 in line +24
+  // The time interval is stored in milliseconds, hence the factors 1000
   // The output is stored in hundreths of percents
+  // Shamelessly copied from the Arduino PID Library
 
-  //Maybe change this back to the Arduino PID Library
+  // Timing stuff
+  const uint16_t interval = 100;
+  static uint32_t last_time = millis();
+  uint32_t now = millis();
+  unsigned long timeChange = (now - last_time);
 
-  const int interval = 100;
+  // Memory
+  static double last_input = ModbusRTUServer.holdingRegisterRead(reg_working_process_variable);
+  static double output_sum = 0;
 
-  static unsigned long last_update = millis();
-  if (millis() - last_update < interval)
-    return;
+  // Control loop
+  if(timeChange>=interval)
+  {
+    // Convert from parallel for to standard form
+    // TODO Units
+    double kp = 10000 / ModbusRTUServer.holdingRegisterRead(reg_pid_p);
+    double ki = kp / ModbusRTUServer.holdingRegisterRead(reg_pid_i) * interval / 1000;
+    double kd = kp * ModbusRTUServer.holdingRegisterRead(reg_pid_d) * 1000 / interval;
 
-  last_update = millis();
+    /*Compute all the working error variables*/
+    double input = ModbusRTUServer.holdingRegisterRead(reg_working_process_variable);
+    double error = ModbusRTUServer.holdingRegisterRead(reg_working_setpoint) - input;
+    double dInput = (input - last_input);
 
-  static long int last_error = 0;
-  static long int error_sum = 0;
+    // Integral term
+    output_sum += (ki * error);
+    output_sum = constrain(output_sum, 0, 10000);
 
-  long int error = ModbusRTUServer.holdingRegisterRead(reg_working_setpoint) - ModbusRTUServer.holdingRegisterRead(reg_working_process_variable);
+    // Add integral, proportional and differential term term
+    double output = output_sum + kp * error - kd * dInput;
+    output = constrain(output, 0, 10000);
 
-  // Over/underflow prevention for error integration
-  const long int max_error_sum = 21474836L;
-  const long int min_error_sum = -21474836L;
-  if (max_error_sum - error_sum < error && error > 0)
-    error_sum = max_error_sum;
-  else if (min_error_sum - error_sum > error && error < 0)
-    error_sum = min_error_sum;
-  else
-    error_sum += error;
-
-  long int error_diff = error - last_error;
-  last_error = error;
-
-  // Here do bad things happen probably!
-  long int output = (error + error_sum * interval / 1000 / ModbusRTUServer.holdingRegisterRead(reg_pid_i) + error_diff * ModbusRTUServer.holdingRegisterRead(reg_pid_d) * 1000 / interval) * 10000 / ModbusRTUServer.holdingRegisterRead(reg_pid_p);
-  output = static_cast<int>(constrain(output, 0, 10000));
-
-  ModbusRTUServer.holdingRegisterWrite(reg_working_power, output);
+    last_input = input;
+    last_time = now;
+    
+    ModbusRTUServer.holdingRegisterWrite(reg_working_power, output);
+  }
 }
 
 void working_setpoint_adjust()
