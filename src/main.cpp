@@ -142,25 +142,25 @@ void write_to_eeprom()
   static uint16_t pid_d = static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_d));
   static uint16_t rate = static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_rate));
 
-  if(static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_p)) != pid_p)
+  if (static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_p)) != pid_p)
   {
     pid_p = static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_p));
     EEPROM.put(ee_pid_p, pid_p);
   }
 
-  if(static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_i)) != pid_i)
+  if (static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_i)) != pid_i)
   {
     pid_i = static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_i));
     EEPROM.put(ee_pid_i, pid_i);
   }
 
-  if(static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_d)) != pid_d)
+  if (static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_d)) != pid_d)
   {
     pid_d = static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_d));
     EEPROM.put(ee_pid_d, pid_d);
   }
 
-  if(static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_rate)) != rate)
+  if (static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_rate)) != rate)
   {
     rate = static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_rate));
     EEPROM.put(ee_rate, rate);
@@ -196,7 +196,7 @@ void pid_calculation()
   static double output_sum = 0;
 
   // Control loop
-  if(timeChange>=interval)
+  if (timeChange >= interval)
   {
     // Convert from parallel for to standard form
     // TODO Units
@@ -219,48 +219,36 @@ void pid_calculation()
 
     last_input = input;
     last_time = now;
-    
+
     ModbusRTUServer.holdingRegisterWrite(reg_working_power, output);
   }
 }
 
 void working_setpoint_adjust()
 {
-  //TODO: Add overshoot protection!!
-  // Adjust the working setpoint with the given ramp
-  // If the working setpoint already equals the target setpoint, do nothing
-  // Every 100 milliseconds a new setpoint is calculated based on elapsed time since last update and ramp
+  // Adjust the working setpoint by an increment based on the given ramp or until the target SP is reached
+  // Only perform the update every 100 milliseconds
   // The setpoint is written to the Modbus register as 10ths of degrees, but kept internally as [deciDegrees times millisecond per minute] to minimize rounding errors
 
-  static bool is_ramping = false;
-  static unsigned long int last_update = millis();
+  static uint32_t last_update = millis();
+  uint32_t now = millis();
+  if (now - last_update < 100)
+    return;
+
+  static int32_t last_setpoint = ModbusRTUServer.holdingRegisterRead(reg_working_setpoint);
   
-  if(is_ramping)
+  // Calculate the change of setpoint
+  int32_t increment = ModbusRTUServer.holdingRegisterRead(reg_rate) * (now - last_update);
+
+  // Check if the controller is ramping up or down and adjust setpoint by increment or until target SP is reached
+  if (ModbusRTUServer.holdingRegisterRead(reg_working_setpoint) < ModbusRTUServer.holdingRegisterRead(reg_target_setpoint))
   {
-    if((ModbusRTUServer.holdingRegisterRead(reg_working_setpoint) == ModbusRTUServer.holdingRegisterRead(reg_target_setpoint)))
-    {
-      is_ramping = false;
-      return;
-    }
-    static long int last_setpoint = 0;
-    unsigned long int now = millis();
-    if (now - last_update > 100)
-    {
-      unsigned long int increment = ModbusRTUServer.holdingRegisterRead(reg_rate) * (now - last_update);
-      if (last_setpoint/1000/60 < ModbusRTUServer.holdingRegisterRead(reg_target_setpoint))
-      {
-        last_setpoint += increment;
-      }
-      else
-        last_setpoint -= increment;
-      last_update = now;
-      ModbusRTUServer.holdingRegisterWrite(reg_working_setpoint, static_cast<int>(last_setpoint/1000/60+0.5));
-    }
+    last_setpoint = min(ModbusRTUServer.holdingRegisterRead(reg_target_setpoint) * 1000 * 60, last_setpoint + increment);
   }
-  else
+  else if(ModbusRTUServer.holdingRegisterRead(reg_working_setpoint) > ModbusRTUServer.holdingRegisterRead(reg_target_setpoint))
   {
-    if((ModbusRTUServer.holdingRegisterRead(reg_working_setpoint) != ModbusRTUServer.holdingRegisterRead(reg_target_setpoint)))
-    is_ramping = true;
-    last_update = millis();
+    last_setpoint = max(ModbusRTUServer.holdingRegisterRead(reg_target_setpoint) * 1000 * 60, last_setpoint - increment);
   }
+  ModbusRTUServer.holdingRegisterWrite(reg_working_setpoint, static_cast<int>(last_setpoint / 1000 / 60 + 0.5));
+  last_update = now;
 }
