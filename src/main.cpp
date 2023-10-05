@@ -107,9 +107,17 @@ void loop()
     pid_calculation();
   }
 
-  set_output_power(ModbusRTUServer.holdingRegisterRead(reg_working_power));
-  digitalWrite(enable_pin, ModbusRTUServer.holdingRegisterRead(reg_software_enable));
+  // Only output Power if the Software enable is active
+  if(ModbusRTUServer.holdingRegisterRead(reg_software_enable))
+  {
+      set_output_power(ModbusRTUServer.holdingRegisterRead(reg_working_power));
+  }
+  else
+  {
+      set_output_power(ModbusRTUServer.holdingRegisterRead(0));
+  }
 
+  digitalWrite(enable_pin, ModbusRTUServer.holdingRegisterRead(reg_software_enable));
   write_to_eeprom();
 }
 
