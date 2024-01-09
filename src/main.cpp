@@ -9,6 +9,7 @@
 const uint8_t pwr_control_pin = 9;
 const uint8_t enable_pin = 2;
 const uint8_t MAX_CS = 10;
+const uint8_t aiming_pin = A0;
 
 Adafruit_MAX31856 maxthermo = Adafruit_MAX31856(MAX_CS);
 
@@ -28,6 +29,7 @@ enum Register
   reg_software_enable,
   reg_tc_type,
   reg_tc_error,
+  reg_aiming_beam,
   SIZE_REGISTERS
 };
 
@@ -57,8 +59,10 @@ void setup()
 {
   pinMode(enable_pin, OUTPUT);
   pinMode(pwr_control_pin, OUTPUT);
+  pinMode(aiming_pin, OUTPUT);
   digitalWrite(enable_pin, LOW);
   digitalWrite(pwr_control_pin, LOW);
+  digitalWrite(aiming_pin, LOW);
   setup_timer();
 
   // Start the Modbus RTU server, with (slave) id 1
@@ -66,13 +70,12 @@ void setup()
   if (!ModbusRTUServer.begin(1, 9600))
   {
     Serial.println("Failed to start Modbus RTU Server!");
-    while (1)
-      ;
+    while (1);
   }
 
-  // Initialize to type S thermocouple
+  // Initialize to type K thermocouple
   maxthermo.begin();
-  maxthermo.setThermocoupleType(MAX31856_TCTYPE_S);
+  maxthermo.setThermocoupleType(MAX31856_TCTYPE_K);
   maxthermo.setConversionMode(MAX31856_CONTINUOUS);
   maxthermo.setNoiseFilter(MAX31856_NOISE_FILTER_50HZ);
 
@@ -119,6 +122,9 @@ void loop()
 
   digitalWrite(enable_pin, ModbusRTUServer.holdingRegisterRead(reg_software_enable));
   write_to_eeprom();
+
+  // Switch the aiming pin
+  digitalWrite(aiming_pin, ModbusRTUServer.holdingRegisterRead(reg_aiming_beam));
 }
 
 void set_output_power(int power)
