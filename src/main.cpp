@@ -6,10 +6,17 @@
 #include <Adafruit_MAX31856.h>
 
 // Pin definitions
+const uint8_t sw_enable = 2;
+const uint8_t aiming_beam_enable = 3;
+const uint8_t tc_fault_bypass = 4;
+const uint8_t hw_enable_readback = 6;
+const uint8_t MAX_DRDY = 7;
+const uint8_t MAX_FAULT = 8;
 const uint8_t pwr_control_pin = 9;
-const uint8_t enable_pin = 2;
 const uint8_t MAX_CS = 10;
-const uint8_t aiming_pin = A0;
+
+// Used for the monitor phiotodiode readout via transimpedance amplifier e4xpansion board
+const uint8_t photodiode_readout = A1;
 
 Adafruit_MAX31856 maxthermo = Adafruit_MAX31856(MAX_CS);
 
@@ -30,6 +37,7 @@ enum Register
   reg_tc_type,
   reg_tc_error,
   reg_aiming_beam,
+  reg_hardware_enable,
   SIZE_REGISTERS
 };
 
@@ -47,7 +55,9 @@ void working_setpoint_adjust();
 void setup_timer();
 void write_to_eeprom();
 void read_from_eeprom();
-void pid_calculation();
+void pid_calculation(bool reset = false);
+bool safety_check();
+void shutdown_on_error();
 
 // About units:
 // All temperature like variables (process_variable, setpoint, error, sum_error and diff_error, pid_p) are stored in tenths of a degree C
@@ -57,12 +67,19 @@ void pid_calculation();
 
 void setup()
 {
-  pinMode(enable_pin, OUTPUT);
+  pinMode(sw_enable, OUTPUT);
+  pinMode(aiming_beam_enable, OUTPUT);
+  pinMode(tc_fault_bypass, INPUT_PULLUP);
+  pinMode(hw_enable_readback, INPUT);
+  pinMode(MAX_DRDY, INPUT);
+  pinMode(MAX_FAULT, INPUT);
   pinMode(pwr_control_pin, OUTPUT);
-  pinMode(aiming_pin, OUTPUT);
-  digitalWrite(enable_pin, LOW);
+  pinMode(photodiode_readout, INPUT);
+
+  digitalWrite(sw_enable, LOW);
+  digitalWrite(aiming_beam_enable, LOW);
   digitalWrite(pwr_control_pin, LOW);
-  digitalWrite(aiming_pin, LOW);
+  
   setup_timer();
 
   // Start the Modbus RTU server, with (slave) id 1
@@ -87,44 +104,69 @@ void setup()
 void loop()
 {
   ModbusRTUServer.poll();
+  write_to_eeprom();
 
-  // Read thermocouple error state and store it in the register, if errors are detected switch the enable register off
-  // If no errors are detected, read temperature
-  ModbusRTUServer.holdingRegisterWrite(reg_tc_error, maxthermo.readFault());
-  if (ModbusRTUServer.holdingRegisterRead(reg_tc_error))
+  // Switch the aiming pin
+  digitalWrite(aiming_beam_enable, ModbusRTUServer.holdingRegisterRead(reg_aiming_beam));
+
+  if (!safety_check())
   {
-    ModbusRTUServer.holdingRegisterWrite(reg_software_enable, 0);
+    shutdown_on_error();
+    return;
   }
   else
   {
     ModbusRTUServer.holdingRegisterWrite(reg_working_process_variable, static_cast<int>(maxthermo.readThermocoupleTemperature() * 10 + 0.5));
+    //Safety checks passed, now actually switch the software enable pin, perform control calculations and set output power
+    // If the controller is in manual mode, write the value of the manual power register to the working power register, otherwise adjust the working setpoint (ramp) and perform PID calculations
+    // Finally set the PWM output based on the value of the working power register
+    digitalWrite(sw_enable, ModbusRTUServer.holdingRegisterRead(reg_software_enable));
+    if(ModbusRTUServer.holdingRegisterRead(reg_control_mode))
+    {
+      ModbusRTUServer.holdingRegisterWrite(reg_working_power, ModbusRTUServer.holdingRegisterRead(reg_manual_power));
+    }
+    else
+    {
+      working_setpoint_adjust();
+      pid_calculation();
+    }
+    set_output_power(ModbusRTUServer.holdingRegisterRead(reg_working_power)); 
   }
+}
 
-  if (ModbusRTUServer.holdingRegisterRead(reg_control_mode))
+bool safety_check()
+{
+  // Read thermocouple error state and store it in the register
+  // If errors are detected and the bypass pin is high (jumper not set) return false
+  // If there are no errors of the bypass is set continue
+  ModbusRTUServer.holdingRegisterWrite(reg_tc_error, maxthermo.readFault());
+  if (ModbusRTUServer.holdingRegisterRead(reg_tc_error) && digitalRead(tc_fault_bypass) == HIGH)
   {
-    ModbusRTUServer.holdingRegisterWrite(reg_working_power, ModbusRTUServer.holdingRegisterRead(reg_manual_power));
+    return false;
   }
-  else
+  // Check if the hardware enable is set, i.e. if the user has armed the laser via the pushbutton on the device
+  if (digitalRead(hw_enable_readback) == LOW)
   {
-    working_setpoint_adjust();
-    pid_calculation();
+    return false;
   }
+  // Fianlly, check if the software enable is set
+  if (ModbusRTUServer.holdingRegisterRead(reg_software_enable) == 0)
+  {
+    return false;
+  }
+  // If all safety checks are passed, return true to allow the controller to operate
+  return true;
+}
 
-  // Only output Power if the Software enable is active
-  if(ModbusRTUServer.holdingRegisterRead(reg_software_enable))
-  {
-      set_output_power(ModbusRTUServer.holdingRegisterRead(reg_working_power));
-  }
-  else
-  {
-      set_output_power(ModbusRTUServer.holdingRegisterRead(0));
-  }
-
-  digitalWrite(enable_pin, ModbusRTUServer.holdingRegisterRead(reg_software_enable));
-  write_to_eeprom();
-
-  // Switch the aiming pin
-  digitalWrite(aiming_pin, ModbusRTUServer.holdingRegisterRead(reg_aiming_beam));
+void shutdown_on_error()
+{
+  // Switch off the software enable pin, switch to manual mode, set output power to 0 and reset the PID controller
+  digitalWrite(sw_enable, LOW);
+  set_output_power(0);
+  ModbusRTUServer.holdingRegisterWrite(reg_control_mode, 1);
+  ModbusRTUServer.holdingRegisterWrite(reg_working_power, 0);
+  ModbusRTUServer.holdingRegisterWrite(reg_manual_power, 0);
+  pid_calculation(true);
 }
 
 void set_output_power(int power)
@@ -136,7 +178,7 @@ void set_output_power(int power)
 
 void setup_timer()
 {
-  // Setup timer 1 for PWM output
+  // Setup timer 1 for PWM output on pin 9 (OC1A)
   // Phase and frequency correct pwm mode
   // No prescaler
   // Top value 10000
@@ -190,7 +232,7 @@ void read_from_eeprom()
   ModbusRTUServer.holdingRegisterWrite(reg_rate, EEPROM.get(ee_rate, temp));
 }
 
-void pid_calculation()
+void pid_calculation(bool reset)
 {
   // About units:
   // All temperature like variables (process_variable, setpoint, error, sum_error and diff_error, pid_p) are stored in tenths of a degree C
@@ -208,6 +250,14 @@ void pid_calculation()
   // Memory
   static double last_input = ModbusRTUServer.holdingRegisterRead(reg_working_process_variable);
   static double output_sum = 0;
+
+  if(reset)
+  {
+    // Reset the error accumulation and the last input to prevent integral windup and large derivative kick when switching from manual to automatic mode or when a thermocouple error is detected and the controller is switched off
+    last_input = ModbusRTUServer.holdingRegisterRead(reg_working_process_variable);
+    output_sum = 0;
+    return;
+  }
 
   // Control loop
   if (timeChange >= interval)
