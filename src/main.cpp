@@ -52,7 +52,8 @@ enum EEPROMAdress
   ee_rate = 10,
   ee_pid_p = 12,
   ee_pid_i = 14,
-  ee_pid_d = 16
+  ee_pid_d = 16,
+  ee_tc_type = 18,
 };
 
 enum laser_safety_state
@@ -249,6 +250,7 @@ void write_to_eeprom()
   static uint16_t pid_i = static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_i));
   static uint16_t pid_d = static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_d));
   static uint16_t rate = static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_rate));
+  static uint16_t tc_type = static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_tc_type));
 
   if (static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_pid_p)) != pid_p)
   {
@@ -273,6 +275,12 @@ void write_to_eeprom()
     rate = static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_rate));
     EEPROM.put(ee_rate, rate);
   }
+
+  if (static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_tc_type)) != tc_type)
+  {
+    tc_type = static_cast<uint16_t>(ModbusRTUServer.holdingRegisterRead(reg_tc_type));
+    EEPROM.put(ee_tc_type, tc_type);
+  }
 }
 
 uint16_t sanitize(uint16_t value, uint16_t lower_bound, uint16_t upper_bound, uint16_t fallback)
@@ -289,6 +297,7 @@ void read_from_eeprom()
   ModbusRTUServer.holdingRegisterWrite(reg_pid_i, sanitize(EEPROM.get(ee_pid_i, temp), 1, 10000, 100));
   ModbusRTUServer.holdingRegisterWrite(reg_pid_d, sanitize(EEPROM.get(ee_pid_d, temp), 0, 10000, 0));
   ModbusRTUServer.holdingRegisterWrite(reg_rate, sanitize(EEPROM.get(ee_rate, temp), 1, 1200, 15));
+    ModbusRTUServer.holdingRegisterWrite(reg_tc_type, EEPROM.get(ee_tc_type, temp));
 }
 
 void pid_calculation(bool reset)
